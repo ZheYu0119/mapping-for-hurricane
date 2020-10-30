@@ -1,0 +1,152 @@
+---
+title: "Report"
+author: "Zhe Yu"
+date: "2020/10/28"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+library(usmap)
+library(dplyr)
+library(tidyverse)
+library(drat)
+library(hurricaneexposuredata)
+library(hurricaneexposure)
+library(ggplot2)
+library(maps)
+library(tmap)
+library(leaflet)
+library(sf)
+library(sp)
+addRepo("geanders")
+data("hurr_tracks")
+data("rain")
+head(hurr_tracks)
+head(rain)
+```
+
+## Prepare data
+
+We use the maps to obtain the data of fips. And combine the this data with precip data. In order to obtain different levels of precip, using cut function to create a new column contain the information of levels. 
+
+```{r warning=FALSE}
+#combine the fips with maps data
+data(county.fips)
+Map=st_as_sf(map('county',plot=F,fill=T))
+colnames(county.fips)[2]=colnames(Map)[1]
+Map=left_join(Map,county.fips,'ID')
+
+#for storm Floyd-1999
+Floyd_track=force(hurr_tracks) %>% filter(storm_id=='Floyd-1999')
+frain=force(rain) %>% filter(storm_id=='Floyd-1999') %>% group_by(fips) %>%
+  summarise(storm_id=storm_id[1],precip=sum(precip))%>%
+  mutate(fips=as.numeric(fips))
+frain=right_join(Map,frain,'fips')
+labels <- c("[0,25]","(25,50]","(50,75]","(75,100]","(100,125]","(125,150]",
+            "(150,175]","(175,200]","(200,222]")
+break1 <- c(-1,25,50,75,100,120,150,175,200,250)
+frain$scale <- cut(frain$precip,break1,labels,ordered_result = T)
+
+#for storm Allison-2001
+Allison_track=force(hurr_tracks)%>%
+  filter(storm_id=='Allison-2001')
+arain=force(rain)%>%
+  filter(storm_id=='Allison-2001')%>%
+  group_by(fips)%>%
+  summarise(storm_id=storm_id[1],precip=sum(precip))%>%
+  mutate(fips=as.numeric(fips))
+arain=right_join(Map,arain,'fips')
+arain$scale <- cut(arain$precip,c(-1,175,500),c("Unexposed","Exposed"),ordered_result = T)
+
+```
+
+## Using ggplot2
+
+We select the counties and using the data to draw the maps.
+
+```{r}
+# prepare the map:select the counties
+county <- map_data(map = "county",
+                     region = c("texas","oklahoma","kansas","louisiana", 
+                                "arkansas", 
+                                "missouri", "iowa","wisconsin", "michigan",
+                                "illinois","indiana", 
+                                "ohio", "kentucky", "tennessee", "alabama", 
+                                "mississippi",
+                                "florida", "georgia", "south carolina", 
+                                "north carolina", "virginia",
+                                "west virginia", "maryland", "delaware", 
+                                "pennsylvania", "new jersey", 
+                                "new york", "connecticut", "rhode island",
+                                "massachusetts", "vermont",
+                                "new hampshire", "maine"))
+
+state <- map_data(map = "state",
+                    region = c("texas","oklahoma","kansas","louisiana", 
+                               "arkansas", 
+                               "missouri", "iowa","wisconsin", "michigan",
+                               "illinois","indiana", 
+                               "ohio", "kentucky", "tennessee", "alabama",
+                               "mississippi",
+                               "florida", "georgia", "south carolina",
+                               "north carolina", "virginia",
+                               "west virginia", "maryland", "delaware",
+                               "pennsylvania", "new jersey", 
+                               "new york", "connecticut", "rhode island",
+                               "massachusetts", "vermont",
+                               "new hampshire", "maine"))
+# Floyd-1999
+ggplot()+
+  ggtitle("Floyd-1999")+
+  geom_polygon(data=county, aes(x=long, y=lat, group=group),
+                color="snow3", fill="white") +
+  geom_sf(data=frain,mapping=aes(fill=scale),color="gray65",size=0.1)+
+  geom_polygon(data=state, aes(x=long, y=lat, group=group),
+                color="black", fill="lightgray",  size = 0.4, alpha = .3) +
+  scale_fill_brewer(name="Rainfall (mm)")+
+  geom_path( data=Floyd_track[20:45,], aes(x=longitude, y=latitude),
+             color="red4",size=0.3)
+
+
+# Allison-2001
+ggplot()+
+  ggtitle("Allison-2001")+
+  geom_polygon(data=county, aes(x=long, y=lat, group=group),
+               color="snow3", fill="white")+
+  geom_sf(data=arain,mapping=aes(fill=scale),color="gray65",size=0.1)+
+  geom_polygon(data=state, aes(x=long, y=lat, group=group),
+               color="black", fill="lightgray",  size = 0.3, alpha = .3) +
+  scale_fill_brewer(name="Rain > 175 mm",palette="Paired")+
+  geom_path( data=Allison_track, aes(x=longitude, y=latitude),
+             color="red4",size=0.3)
+```
+
+## Using tmap
+
+Transfer the data of tracks to make it match with the tmap package. 
+
+```{r warning=FALSE}
+t_Floyd_track=cbind(Floyd_track$longitude,Floyd_track$latitude)%>%Line()%>%
+  Lines(ID='Floyd-1999')%>%list()%>%SpatialLines()
+
+tm_shape(frain,title="Floyd-1999",col="gray")+
+  tm_polygons("scale",palette="Blues",title="Rainfall(mm)")+
+  tm_shape(t_Floyd_track)+tm_lines(col='red4',lwd =1.2)+
+  tm_layout(main.title='Floyd-1999')
+
+t_Allison_track=cbind(Allison_track$longitude,Allison_track$latitude)%>%
+  Line()%>%Lines(ID='Allison-2001')%>%list()%>%SpatialLines()
+
+tm_shape(arain,title="Floyd-1999",col="gray")+
+  tm_polygons("scale",palette=c("white","dodgerblue3"),title="Rain > 175 mm")+
+  tm_shape(t_Allison_track)+tm_lines(col='red4',lwd=1.2)+tm_style("watercolor")+
+  tm_layout(main.title='Allison-2001')
+
+```
+
+
